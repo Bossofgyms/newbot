@@ -1,46 +1,57 @@
-# bot.py
 import asyncio
+import logging
+import os
+import re
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
-import logging
-import re
-# Импорты для кнопки
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from dotenv import load_dotenv
 
-# ... другие необходимые импорты
-from config import BOT_TOKEN
+# Загружаем переменные окружения из .env файла
+load_dotenv()
+
+# Получаем токен бота из переменной окружения
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# Проверяем, задан ли токен
+if not BOT_TOKEN:
+    raise ValueError("❌ Переменная окружения BOT_TOKEN не задана! Проверь файл .env")
+
+# Импортируем модули проекта
 from database import init_db, save_user, update_user_data, subscribe_user, unsubscribe_user, get_user_data
 from zodiac import get_zodiac_sign
 from horoscope_api import get_daily_horoscope, get_natal_chart_info
 from scheduler import scheduler
 
+# Настраиваем логирование
 logging.basicConfig(level=logging.INFO)
 
+# Создаём экземпляры бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Определяем состояния для FSM
 class UserData(StatesGroup):
     waiting_for_birth_date = State()
     waiting_for_birth_time = State()
     waiting_for_birth_place = State()
 
+# Функция для создания основной клавиатуры с кнопками
 def get_main_keyboard():
     """Создание основной клавиатуры с кнопками"""
     keyboard = [
         [types.KeyboardButton(text="🔮 Гороскоп")],
         [types.KeyboardButton(text="📊 Натальная карта")],
-        # --- Добавляем кнопку "Число жизни" ---
         [types.KeyboardButton(text="🔢 Число жизни")],
-        # ----------------------------------------
         [types.KeyboardButton(text="📨 Подписаться на гороскоп"), types.KeyboardButton(text="❌ Отписаться")],
         [types.KeyboardButton(text="👤 Мой профиль")],
         [types.KeyboardButton(text="❓ Помощь")]
     ]
     return types.ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
-# --- Добавляем функцию для вычисления формулы души ---
+# Функция для вычисления числа жизни (формулы души)
 def calculate_soul_formula(birth_date_str: str) -> str:
     """
     Вычисляет Число жизни по дате рождения.
@@ -56,13 +67,13 @@ def calculate_soul_formula(birth_date_str: str) -> str:
         # Разделяем дату и проверяем формат
         parts = birth_date_str.split('.')
         if len(parts) != 3:
-             return "Неверный формат даты."
+            return "Неверный формат даты."
 
         day, month, year = map(int, parts)
 
         # Проверка диапазонов (упрощённая)
         if not (1 <= day <= 31) or not (1 <= month <= 12) or not (1900 <= year <= 2030):
-             return "Некорректная дата."
+            return "Некорректная дата."
 
         # Суммируем все цифры
         total = day + month + year
@@ -78,8 +89,7 @@ def calculate_soul_formula(birth_date_str: str) -> str:
         logging.error(f"Ошибка при вычислении числа жизни для {birth_date_str}: {e}")
         return "Ошибка при расчёте."
 
-# --- Конец добавления функции ---
-
+# Функция для создания стартовой клавиатуры
 def get_start_keyboard():
     """Клавиатура для начального экрана"""
     keyboard = [
@@ -87,6 +97,7 @@ def get_start_keyboard():
     ]
     return types.ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
+# Функция для установки команд бота
 async def set_bot_commands(bot: Bot):
     """Устанавливает список команд бота, видимый в интерфейсе Telegram."""
     commands = [
@@ -95,6 +106,7 @@ async def set_bot_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
+# Обработчик команды /start
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext):
     """Обработчик команды /start - удаляет команду и показывает приветствие"""
@@ -106,9 +118,12 @@ async def cmd_start(message: types.Message, state: FSMContext):
         logging.warning(f"Не удалось удалить сообщение /start: {e}")
         command_deleted = False
 
+    # Сохраняем пользователя в базе данных
     await save_user(message.from_user.id)
+    # Очищаем состояние
     await state.clear()
     
+    # Текст приветствия
     welcome_text = """
 🔮 Привет! Я астрологический бот!
 
@@ -128,6 +143,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         reply_markup=get_start_keyboard()
     )
 
+# Функция для проверки формата даты
 def validate_date_format(date_str: str) -> tuple[bool, str]:
     """Проверка формата даты"""
     if not date_str or not isinstance(date_str, str):
@@ -163,6 +179,7 @@ def validate_date_format(date_str: str) -> tuple[bool, str]:
     except ValueError:
         return False, "Неверный формат чисел в дате"
 
+# Функция для проверки формата времени
 def validate_time_format(time_str: str) -> tuple[bool, str]:
     """Проверка формата времени"""
     if not time_str or not isinstance(time_str, str):
@@ -188,7 +205,7 @@ def validate_time_format(time_str: str) -> tuple[bool, str]:
     except ValueError:
         return False, "Неверный формат чисел во времени"
 
-# ИСПРАВЛЕННАЯ ФУНКЦИЯ - теперь она правильно обрабатывает ввод даты
+# Обработчик ввода даты рождения
 @dp.message(lambda message: message.text and '.' in message.text and len(message.text.split('.')) == 3)
 async def get_birth_date(message: types.Message, state: FSMContext):
     """Обработка ввода даты рождения - удаляет сообщение и обрабатывает данные"""
@@ -255,6 +272,7 @@ async def get_birth_date(message: types.Message, state: FSMContext):
                  f"Пожалуйста, введите дату в формате ДД.ММ.ГГГГ\nПример: 31.07.1990"
         )
 
+# Обработчик ввода времени рождения
 @dp.message(UserData.waiting_for_birth_time)
 async def get_birth_time(message: types.Message, state: FSMContext):
     """Обработка ввода времени рождения - удаляет сообщение и обрабатывает данные"""
@@ -291,6 +309,7 @@ async def get_birth_time(message: types.Message, state: FSMContext):
         reply_markup=types.ReplyKeyboardRemove()
     )
 
+# Обработчик ввода места рождения
 @dp.message(UserData.waiting_for_birth_place)
 async def get_birth_place(message: types.Message, state: FSMContext):
     """Обработка ввода места рождения - удаляет сообщение и обрабатывает данные"""
@@ -368,6 +387,7 @@ async def get_birth_place(message: types.Message, state: FSMContext):
 # --- ХЭНДЛЕРЫ ДЛЯ КНОПОК И КОМАНД ---
 # Они должны быть зарегистрированы до универсального хэндлера, чтобы сработать первыми
 
+# Обработчик команды /help
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     """Обработчик команды /help - удаляет команду и показывает помощь"""
@@ -403,6 +423,7 @@ async def cmd_help(message: types.Message):
         reply_markup=get_main_keyboard()
     )
 
+# Обработчик кнопки '🔮 Гороскоп'
 @dp.message(lambda message: message.text == "🔮 Гороскоп")
 async def btn_horoscope(message: types.Message):
     """Обработчик кнопки '🔮 Гороскоп' - удаляет сообщение и показывает гороскоп"""
@@ -456,6 +477,7 @@ async def btn_horoscope(message: types.Message):
         reply_markup=get_main_keyboard()
     )
 
+# Обработчик кнопки '📊 Натальная карта'
 @dp.message(lambda message: message.text == "📊 Натальная карта")
 async def btn_natal_chart(message: types.Message):
     """Обработчик кнопки '📊 Натальная карта' - удаляет сообщение и показывает карту"""
@@ -517,6 +539,7 @@ async def btn_natal_chart(message: types.Message):
         disable_web_page_preview=True # Отключаем предпросмотр ссылки в основном тексте
     )
 
+# Обработчик кнопки '👤 Мой профиль'
 @dp.message(lambda message: message.text == "👤 Мой профиль")
 async def btn_profile(message: types.Message):
     """Обработчик кнопки '👤 Мой профиль' - удаляет сообщение и показывает профиль"""
@@ -557,6 +580,7 @@ async def btn_profile(message: types.Message):
         reply_markup=get_main_keyboard()
     )
 
+# Обработчик кнопки '📨 Подписаться на гороскоп'
 @dp.message(lambda message: message.text == "📨 Подписаться на гороскоп")
 async def btn_subscribe(message: types.Message):
     """Обработчик кнопки '📨 Подписаться' - удаляет сообщение и подписывает"""
@@ -581,6 +605,7 @@ async def btn_subscribe(message: types.Message):
         reply_markup=get_main_keyboard()
     )
 
+# Обработчик кнопки '❌ Отписаться'
 @dp.message(lambda message: message.text == "❌ Отписаться")
 async def btn_unsubscribe(message: types.Message):
     """Обработчик кнопки '❌ Отписаться' - удаляет сообщение и отписывает"""
@@ -597,6 +622,7 @@ async def btn_unsubscribe(message: types.Message):
         reply_markup=get_main_keyboard()
     )
 
+# Обработчик кнопки '❓ Помощь'
 @dp.message(lambda message: message.text == "❓ Помощь")
 async def btn_help(message: types.Message):
     """Обработчик кнопки '❓ Помощь' - удаляет сообщение и показывает помощь"""
@@ -632,7 +658,7 @@ async def btn_help(message: types.Message):
         reply_markup=get_main_keyboard()
     )
 
-# --- Добавляем обработчик кнопки "Число жизни" ---
+# Обработчик кнопки "🔢 Число жизни"
 @dp.message(lambda message: message.text == "🔢 Число жизни")
 async def btn_soul_formula(message: types.Message):
     """Обработчик кнопки '🔢 Число жизни' - удаляет сообщение и показывает результат"""
@@ -755,7 +781,7 @@ async def btn_soul_formula(message: types.Message):
         parse_mode='Markdown' # Используем Markdown для форматирования
     )
 
-# --- УНИВЕРСАЛЬНЫЙ ХЭНДЛЕР ДЛЯ ОСТАЛЬНЫХ СООБЩЕНИЙ ---
+# УНИВЕРСАЛЬНЫЙ ХЭНДЛЕР ДЛЯ ОСТАЛЬНЫХ СООБЩЕНИЙ
 # Этот хэндлер должен быть последним, чтобы не перехватывать команды и кнопки
 @dp.message(~F.text.startswith("/")) # Ловим сообщения, которые НЕ начинаются с "/"
 async def handle_any_other_message(message: types.Message, state: FSMContext):
@@ -799,11 +825,13 @@ async def handle_any_other_message(message: types.Message, state: FSMContext):
     #         reply_markup=get_main_keyboard()
     #     )
 
+# Функция для форматирования реального гороскопа
 def format_real_horoscope_message(data: dict) -> str:
     """Форматирование реального гороскопа с астрологическими данными"""
     message = data.get('description', 'Гороскоп недоступен.')
     return message
 
+# Основная функция запуска бота
 async def main():
     await init_db()
     
@@ -819,5 +847,6 @@ async def main():
     # Запускаем polling
     await dp.start_polling(bot_instance)
 
+# Точка входа в программу
 if __name__ == "__main__":
     asyncio.run(main())
