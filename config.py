@@ -1,6 +1,6 @@
 # config.py
 
-BOT_TOKEN = "7809440053:AAEvxMFwPvX9jgmL3r-wJbPO4Zly-IKLVzA"
+
 
 # Источники для гороскопов
 HOROSCOPE_SOURCES = [
