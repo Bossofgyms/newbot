@@ -1,0 +1,26 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+virtualenv/
+pip-log.txt
+.project
+.pydevproject
+.venv
+
+# Переменные окружения
+.env
+.env.local
+
+# Системные файлы
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
