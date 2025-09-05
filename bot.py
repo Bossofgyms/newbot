@@ -8,19 +8,40 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
+from openai import AsyncOpenAI
 
 # Загружаем переменные окружения из .env файла
 load_dotenv()
 
 # Получаем токен бота из переменной окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+QWEN_API_KEY = os.getenv("QWEN_API_KEY")
 
 # Проверяем, задан ли токен
 if not BOT_TOKEN:
     raise ValueError("❌ Переменная окружения BOT_TOKEN не задана! Проверь файл .env")
 
+if not QWEN_API_KEY:
+    raise ValueError(
+        "❌ Переменная окружения QWEN_API_KEY не задана! Проверь файл .env"
+    )
+
+# Инициализируем Qwen клиент
+# Замените текущую настройку клиента на эту:
+qwen_client = AsyncOpenAI(
+    api_key=QWEN_API_KEY,
+    base_url="https://openrouter.ai/api/v1"
+)
+
 # Импортируем модули проекта
-from database import init_db, save_user, update_user_data, subscribe_user, unsubscribe_user, get_user_data
+from database import (
+    init_db,
+    save_user,
+    update_user_data,
+    subscribe_user,
+    unsubscribe_user,
+    get_user_data,
+)
 from zodiac import get_zodiac_sign
 from horoscope_api import get_daily_horoscope, get_natal_chart_info
 from scheduler import scheduler
@@ -32,11 +53,13 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+
 # Определяем состояния для FSM
 class UserData(StatesGroup):
     waiting_for_birth_date = State()
     waiting_for_birth_time = State()
     waiting_for_birth_place = State()
+
 
 # Функция для создания основной клавиатуры с кнопками
 def get_main_keyboard():
@@ -45,11 +68,16 @@ def get_main_keyboard():
         [types.KeyboardButton(text="🔮 Гороскоп")],
         [types.KeyboardButton(text="📊 Натальная карта")],
         [types.KeyboardButton(text="🔢 Число жизни")],
-        [types.KeyboardButton(text="📨 Подписаться на гороскоп"), types.KeyboardButton(text="❌ Отписаться")],
+        [types.KeyboardButton(text="🧠 Психопортрет")],
+        [
+            types.KeyboardButton(text="📨 Подписаться на гороскоп"),
+            types.KeyboardButton(text="❌ Отписаться"),
+        ],
         [types.KeyboardButton(text="👤 Мой профиль")],
-        [types.KeyboardButton(text="❓ Помощь")]
+        [types.KeyboardButton(text="❓ Помощь")],
     ]
     return types.ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 
 # Функция для вычисления числа жизни (формулы души)
 def calculate_soul_formula(birth_date_str: str) -> str:
@@ -65,7 +93,7 @@ def calculate_soul_formula(birth_date_str: str) -> str:
 
     try:
         # Разделяем дату и проверяем формат
-        parts = birth_date_str.split('.')
+        parts = birth_date_str.split(".")
         if len(parts) != 3:
             return "Неверный формат даты."
 
@@ -89,22 +117,25 @@ def calculate_soul_formula(birth_date_str: str) -> str:
         logging.error(f"Ошибка при вычислении числа жизни для {birth_date_str}: {e}")
         return "Ошибка при расчёте."
 
+
 # Функция для создания стартовой клавиатуры
 def get_start_keyboard():
     """Клавиатура для начального экрана"""
-    keyboard = [
-        [types.KeyboardButton(text="❓ Помощь")]
-    ]
+    keyboard = [[types.KeyboardButton(text="❓ Помощь")]]
     return types.ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 
 # Функция для установки команд бота
 async def set_bot_commands(bot: Bot):
     """Устанавливает список команд бота, видимый в интерфейсе Telegram."""
     commands = [
         types.BotCommand(command="start", description="Начать работу с ботом"),
-        types.BotCommand(command="help", description="Получить справку о командах и функциях бота"),
+        types.BotCommand(
+            command="help", description="Получить справку о командах и функциях бота"
+        ),
     ]
     await bot.set_my_commands(commands)
+
 
 # Обработчик команды /start
 @dp.message(CommandStart())
@@ -122,7 +153,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await save_user(message.from_user.id)
     # Очищаем состояние
     await state.clear()
-    
+
     # Текст приветствия
     welcome_text = """
 🔮 Привет! Я астрологический бот!
@@ -132,31 +163,34 @@ async def cmd_start(message: types.Message, state: FSMContext):
 • Сгенерировать натальную карту
 • Присылать ежедневный гороскоп
 • Дать детальный астрологический анализ
+• Составить психопортрет на основе МВТI, эннеаграммы и Big Five
 
 Введите вашу дату рождения в формате ДД.ММ.ГГГГ
 Например: 31.07.1990
 """
     # Отправляем новое сообщение с приветствием
     await message.bot.send_message(
-        chat_id=message.chat.id,
-        text=welcome_text,
-        reply_markup=get_start_keyboard()
+        chat_id=message.chat.id, text=welcome_text, reply_markup=get_start_keyboard()
     )
+
 
 # Функция для проверки формата даты
 def validate_date_format(date_str: str) -> tuple[bool, str]:
     """Проверка формата даты"""
     if not date_str or not isinstance(date_str, str):
         return False, "Дата не может быть пустой"
-    
+
     # Проверка формата ДД.ММ.ГГГГ
-    if not re.match(r'^\d{1,2}\.\d{1,2}\.\d{4}$', date_str):
-        return False, "Неверный формат даты. Используйте ДД.ММ.ГГГГ (например: 31.07.1990)"
-    
+    if not re.match(r"^\d{1,2}\.\d{1,2}\.\d{4}$", date_str):
+        return (
+            False,
+            "Неверный формат даты. Используйте ДД.ММ.ГГГГ (например: 31.07.1990)",
+        )
+
     try:
-        parts = date_str.split('.')
+        parts = date_str.split(".")
         day, month, year = map(int, parts)
-        
+
         # Проверка диапазонов
         if not (1 <= day <= 31):
             return False, f"День должен быть от 1 до 31 (вы ввели: {day})"
@@ -164,7 +198,7 @@ def validate_date_format(date_str: str) -> tuple[bool, str]:
             return False, f"Месяц должен быть от 1 до 12 (вы ввели: {month})"
         if not (1900 <= year <= 2030):
             return False, f"Год должен быть от 1900 до 2030 (вы ввели: {year})"
-        
+
         # Проверка корректности даты
         if month in [4, 6, 9, 11] and day > 30:
             return False, f"В этом месяце только 30 дней"
@@ -174,39 +208,48 @@ def validate_date_format(date_str: str) -> tuple[bool, str]:
             max_feb_days = 29 if is_leap else 28
             if day > max_feb_days:
                 return False, f"В феврале {year} года только {max_feb_days} дней"
-        
+
         return True, ""
     except ValueError:
         return False, "Неверный формат чисел в дате"
+
 
 # Функция для проверки формата времени
 def validate_time_format(time_str: str) -> tuple[bool, str]:
     """Проверка формата времени"""
     if not time_str or not isinstance(time_str, str):
         return False, "Время не может быть пустым"
-    
-    if time_str == '-':
+
+    if time_str == "-":
         return True, ""
-    
+
     # Проверка формата ЧЧ:ММ
-    if not re.match(r'^\d{1,2}:\d{2}$', time_str):
-        return False, "Неверный формат времени. Используйте ЧЧ:ММ (например: 14:30) или '-' если не знаете"
-    
+    if not re.match(r"^\d{1,2}:\d{2}$", time_str):
+        return (
+            False,
+            "Неверный формат времени. Используйте ЧЧ:ММ (например: 14:30) или '-' если не знаете",
+        )
+
     try:
-        parts = time_str.split(':')
+        parts = time_str.split(":")
         hour, minute = map(int, parts)
-        
+
         if not (0 <= hour <= 23):
             return False, f"Час должен быть от 0 до 23 (вы ввели: {hour})"
         if not (0 <= minute <= 59):
             return False, f"Минуты должны быть от 0 до 59 (вы ввели: {minute})"
-        
+
         return True, ""
     except ValueError:
         return False, "Неверный формат чисел во времени"
 
+
 # Обработчик ввода даты рождения
-@dp.message(lambda message: message.text and '.' in message.text and len(message.text.split('.')) == 3)
+@dp.message(
+    lambda message: message.text
+    and "." in message.text
+    and len(message.text.split(".")) == 3
+)
 async def get_birth_date(message: types.Message, state: FSMContext):
     """Обработка ввода даты рождения - удаляет сообщение и обрабатывает данные"""
     # Пытаемся удалить сообщение пользователя
@@ -217,60 +260,65 @@ async def get_birth_date(message: types.Message, state: FSMContext):
 
     # Проверяем, ожидаем ли мы дату рождения
     current_state = await state.get_state()
-    if current_state is not None and current_state != UserData.waiting_for_birth_date.state:
+    if (
+        current_state is not None
+        and current_state != UserData.waiting_for_birth_date.state
+    ):
         # Если мы в другом состоянии, не обрабатываем это сообщение
         # (например, если пользователь случайно отправил дату позже)
         # В этом случае сообщение уже удалено, ничего не делаем
         return
-    
+
     date_str = message.text.strip()
-    
+
     # Валидация даты
     is_valid, error_message = validate_date_format(date_str)
     if not is_valid:
         # Отправляем сообщение об ошибке в чат
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text=f"❌ Ошибка: {error_message}\n\nПожалуйста, введите дату в формате ДД.ММ.ГГГГ\nПример: 31.07.1990"
+            text=f"❌ Ошибка: {error_message}\n\nПожалуйста, введите дату в формате ДД.ММ.ГГГГ\nПример: 31.07.1990",
         )
         return
-    
+
     try:
-        parts = date_str.split('.')
+        parts = date_str.split(".")
         day, month, year = map(int, parts)
-        
+
         # Дополнительная проверка корректности даты
         import datetime
+
         try:
             datetime.date(year, month, day)
         except ValueError as e:
             await message.bot.send_message(
                 chat_id=message.chat.id,
-                text=f"❌ Ошибка: Некорректная дата ({str(e)})\n\nПожалуйста, введите существующую дату"
+                text=f"❌ Ошибка: Некорректная дата ({str(e)})\n\nПожалуйста, введите существующую дату",
             )
             return
-        
+
         zodiac = get_zodiac_sign(day, month)
-        
+
         # Сохраняем дату рождения и знак зодиака в состоянии
         await state.update_data(birth_date=date_str, zodiac_sign=zodiac)
-        
+
         # Устанавливаем состояние ожидания времени рождения
         await state.set_state(UserData.waiting_for_birth_time)
-        
+
         await message.bot.send_message(
             chat_id=message.chat.id,
             text=f"✅ Дата принята!\nВаш знак зодиака: {zodiac} ♢\n\n"
-                 f"Введите время рождения (формат ЧЧ:ММ) или отправьте '-' если не знаете:",
-            reply_markup=types.ReplyKeyboardRemove()
+            f"Введите время рождения (формат ЧЧ:ММ) или отправьте '-' если не знаете:",
+            reply_markup=types.ReplyKeyboardRemove(),
         )
-        
+
     except Exception as e:
         await message.bot.send_message(
             chat_id=message.chat.id,
             text=f"❌ Произошла ошибка при обработке даты: {str(e)}\n\n"
-                 f"Пожалуйста, введите дату в формате ДД.ММ.ГГГГ\nПример: 31.07.1990"
+            f"Пожалуйста, введите дату в формате ДД.ММ.ГГГГ\nПример: 31.07.1990",
         )
+
 
 # Обработчик ввода времени рождения
 @dp.message(UserData.waiting_for_birth_time)
@@ -283,31 +331,32 @@ async def get_birth_time(message: types.Message, state: FSMContext):
         logging.warning(f"Не удалось удалить сообщение с временем: {e}")
 
     time_str = message.text.strip()
-    
+
     # Валидация времени
     is_valid, error_message = validate_time_format(time_str)
     if not is_valid:
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text=f"❌ Ошибка: {error_message}\n\nВведите время в формате ЧЧ:ММ или '-' если не знаете"
+            text=f"❌ Ошибка: {error_message}\n\nВведите время в формате ЧЧ:ММ или '-' если не знаете",
         )
         return
-    
+
     birth_time = None
-    if time_str != '-':
+    if time_str != "-":
         birth_time = time_str
-    
+
     # Сохраняем время рождения в состоянии
     await state.update_data(birth_time=birth_time)
-    
+
     # Устанавливаем состояние ожидания места рождения
     await state.set_state(UserData.waiting_for_birth_place)
-    
+
     await message.bot.send_message(
         chat_id=message.chat.id,
         text="Введите место рождения (город) или отправьте '-':",
-        reply_markup=types.ReplyKeyboardRemove()
+        reply_markup=types.ReplyKeyboardRemove(),
     )
+
 
 # Обработчик ввода места рождения
 @dp.message(UserData.waiting_for_birth_place)
@@ -321,50 +370,46 @@ async def get_birth_place(message: types.Message, state: FSMContext):
 
     birth_place = None
     place_text = message.text.strip()
-    
+
     # Проверка на пустой ввод
     if not place_text:
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text="❌ Место рождения не может быть пустым. Введите название города или отправьте '-'"
+            text="❌ Место рождения не может быть пустым. Введите название города или отправьте '-'",
         )
         return
-    
-    if place_text != '-':
+
+    if place_text != "-":
         # Проверка на допустимые символы
-        if not re.match(r'^[а-яА-Яa-zA-Z\s\-,\.\d]+$', place_text):
+        if not re.match(r"^[а-яА-Яa-zA-Z\s\-,\.\d]+$", place_text):
             await message.bot.send_message(
                 chat_id=message.chat.id,
-                text="❌ Недопустимые символы в названии города. Используйте буквы, пробелы и дефисы"
+                text="❌ Недопустимые символы в названии города. Используйте буквы, пробелы и дефисы",
             )
             return
         birth_place = place_text
-    
+
     # Получаем все данные из состояния
     user_data = await state.get_data()
-    birth_date = user_data['birth_date']
-    zodiac_sign = user_data['zodiac_sign']
-    birth_time = user_data.get('birth_time')
-    
+    birth_date = user_data["birth_date"]
+    zodiac_sign = user_data["zodiac_sign"]
+    birth_time = user_data.get("birth_time")
+
     # Сохраняем данные в базе данных
     await update_user_data(
-        message.from_user.id, 
-        birth_date, 
-        zodiac_sign, 
-        birth_time, 
-        birth_place
+        message.from_user.id, birth_date, zodiac_sign, birth_time, birth_place
     )
-    
+
     # Очищаем состояние
     await state.clear()
-    
+
     # Отправляем подтверждение и показываем главное меню
     await message.bot.send_message(
         chat_id=message.chat.id,
         text="✅ Данные успешно сохранены!",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(),
     )
-    
+
     # Показываем приветственное сообщение с кнопками
     welcome_msg = f"""
 🔮 Добро пожаловать в меню астролога!
@@ -377,15 +422,14 @@ async def get_birth_place(message: types.Message, state: FSMContext):
         welcome_msg += f"⏰ Время рождения: {birth_time}\n"
     if birth_place:
         welcome_msg += f"📍 Место рождения: {birth_place}\n"
-    
+
     welcome_msg += "\nИспользуйте кнопки ниже для навигации:"
-    await message.bot.send_message(
-        chat_id=message.chat.id,
-        text=welcome_msg
-    )
+    await message.bot.send_message(chat_id=message.chat.id, text=welcome_msg)
+
 
 # --- ХЭНДЛЕРЫ ДЛЯ КНОПОК И КОМАНД ---
 # Они должны быть зарегистрированы до универсального хэндлера, чтобы сработать первыми
+
 
 # Обработчик команды /help
 @dp.message(Command("help"))
@@ -406,6 +450,8 @@ async def cmd_help(message: types.Message):
 Кнопки меню:
 🔮 Гороскоп - Получить гороскоп на сегодня
 📊 Натальная карта - Ссылка на вашу натальную карту
+🔢 Число жизни - Рассчитать число жизни
+🧠 Психопортрет - Составить психологический портрет
 👤 Мой профиль - Просмотр ваших данных
 📨 Подписаться - Ежедневная рассылка гороскопа
 ❌ Отписаться - Отменить подписку
@@ -418,10 +464,9 @@ async def cmd_help(message: types.Message):
 /help - Помощь
 """
     await message.bot.send_message(
-        chat_id=message.chat.id,
-        text=help_text,
-        reply_markup=get_main_keyboard()
+        chat_id=message.chat.id, text=help_text, reply_markup=get_main_keyboard()
     )
+
 
 # Обработчик кнопки '🔮 Гороскоп'
 @dp.message(lambda message: message.text == "🔮 Гороскоп")
@@ -435,47 +480,51 @@ async def btn_horoscope(message: types.Message):
 
     # 1. Получаем данные пользователя из БД
     user_data_from_db = await get_user_data(message.from_user.id)
-    if not user_data_from_db or not user_data_from_db[1]: # Проверяем наличие знака зодиака
+    if (
+        not user_data_from_db or not user_data_from_db[1]
+    ):  # Проверяем наличие знака зодиака
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text="❌ Сначала введите дату рождения через /start"
+            text="❌ Сначала введите дату рождения через /start",
         )
         return
 
     # 2. Извлекаем необходимые данные
     birth_date_str = user_data_from_db[0]  # Дата рождения (строка)
-    zodiac_sign = user_data_from_db[1]     # Знак зодиака (строка)
+    zodiac_sign = user_data_from_db[1]  # Знак зодиака (строка)
 
     # 3. Подготавливаем параметры дня и месяца рождения
     birth_day_int = None
     birth_month_int = None
     if birth_date_str:
         try:
-            day, month, year = map(int, birth_date_str.split('.'))
+            day, month, year = map(int, birth_date_str.split("."))
             birth_day_int = day
             birth_month_int = month
         except (ValueError, IndexError):
-            logging.warning(f"Предупреждение: Не удалось распарсить дату рождения '{birth_date_str}' для пользователя {message.from_user.id}")
+            logging.warning(
+                f"Предупреждение: Не удалось распарсить дату рождения '{birth_date_str}' для пользователя {message.from_user.id}"
+            )
             # birth_day_int и birth_month_int останутся None
 
     # 4. Отправляем сообщение о загрузке и вызываем функцию гороскопа
     # loading_msg = await message.answer("🔮 Получаю астрологический гороскоп...")
     loading_msg = await message.bot.send_message(
-        chat_id=message.chat.id,
-        text="🔮 Получаю астрологический гороскоп..."
+        chat_id=message.chat.id, text="🔮 Получаю астрологический гороскоп..."
     )
-    
+
     # 5. Передаем день и месяц рождения в функцию
-    horoscope_data = await get_daily_horoscope(zodiac_sign, birth_day_int, birth_month_int)
-    
+    horoscope_data = await get_daily_horoscope(
+        zodiac_sign, birth_day_int, birth_month_int
+    )
+
     await loading_msg.delete()
-    
+
     message_text = format_real_horoscope_message(horoscope_data)
     await message.bot.send_message(
-        chat_id=message.chat.id,
-        text=message_text,
-        reply_markup=get_main_keyboard()
+        chat_id=message.chat.id, text=message_text, reply_markup=get_main_keyboard()
     )
+
 
 # Обработчик кнопки '📊 Натальная карта'
 @dp.message(lambda message: message.text == "📊 Натальная карта")
@@ -492,40 +541,42 @@ async def btn_natal_chart(message: types.Message):
     if not user_data or not user_data[0]:  # Проверяем наличие даты рождения
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text="❌ Сначала введите дату рождения через /start"
+            text="❌ Сначала введите дату рождения через /start",
         )
         return
-    
+
     # 2. Извлекаем данные
     birth_date, zodiac_sign, birth_time, birth_place = user_data
-    
-    # 3. Получаем информацию о натальной карте 
+
+    # 3. Получаем информацию о натальной карте
     # Теперь get_natal_chart_info возвращает dict с ключами 'info_text' и 'url'
     natal_data = await get_natal_chart_info(birth_date, birth_time, birth_place)
-    
+
     # 4. Проверяем, не возникла ли ошибка внутри get_natal_chart_info
     if isinstance(natal_data, dict) and "error" in natal_data:
         await message.bot.send_message(
-            chat_id=message.chat.id,
-            text=natal_data["error"]
+            chat_id=message.chat.id, text=natal_data["error"]
         )
         return
 
     # 5. Извлекаем текст и URL из результата
-    if isinstance(natal_data, dict) and "info_text" in natal_data and "url" in natal_data:
+    if (
+        isinstance(natal_data, dict)
+        and "info_text" in natal_data
+        and "url" in natal_data
+    ):
         info_text = natal_data["info_text"]
         chart_url = natal_data["url"]
     else:
         # На случай, если функция по какой-то причине всё ещё возвращает строку
         await message.bot.send_message(
-            chat_id=message.chat.id,
-            text="⚠️ Ошибка получения данных натальной карты."
+            chat_id=message.chat.id, text="⚠️ Ошибка получения данных натальной карты."
         )
         return
 
     # 6. Формируем основной текст ответа
     response = f"📊 Натальная карта для {zodiac_sign}\n\n"
-    response += info_text # Добавляем информационный текст
+    response += info_text  # Добавляем информационный текст
 
     # 7. Создаем кнопку с ссылкой на натальную карту
     button = InlineKeyboardButton(text="🔮 Рассчитать натальную карту", url=chart_url)
@@ -534,10 +585,11 @@ async def btn_natal_chart(message: types.Message):
     # 8. Отправляем сообщение с текстом и кнопкой
     await message.bot.send_message(
         chat_id=message.chat.id,
-        text=response, 
-        reply_markup=keyboard, # Прикрепляем клавиатуру с кнопкой
-        disable_web_page_preview=True # Отключаем предпросмотр ссылки в основном тексте
+        text=response,
+        reply_markup=keyboard,  # Прикрепляем клавиатуру с кнопкой
+        disable_web_page_preview=True,  # Отключаем предпросмотр ссылки в основном тексте
     )
+
 
 # Обработчик кнопки '👤 Мой профиль'
 @dp.message(lambda message: message.text == "👤 Мой профиль")
@@ -553,19 +605,19 @@ async def btn_profile(message: types.Message):
     if not user_data or not user_data[0]:
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text="❌ Сначала введите дату рождения через /start"
+            text="❌ Сначала введите дату рождения через /start",
         )
         return
-    
+
     birth_date, zodiac_sign, birth_time, birth_place = user_data
-    
+
     if not birth_date:
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text="❌ Сначала введите дату рождения через /start"
+            text="❌ Сначала введите дату рождения через /start",
         )
         return
-    
+
     response = f"👤 Ваш профиль:\n\n"
     response += f"🎂 Дата рождения: {birth_date}\n"
     response += f"⭐ Знак зодиака: {zodiac_sign or 'Не определен'}\n"
@@ -573,12 +625,11 @@ async def btn_profile(message: types.Message):
         response += f"⏰ Время рождения: {birth_time}\n"
     if birth_place:
         response += f"📍 Место рождения: {birth_place}\n"
-    
+
     await message.bot.send_message(
-        chat_id=message.chat.id,
-        text=response,
-        reply_markup=get_main_keyboard()
+        chat_id=message.chat.id, text=response, reply_markup=get_main_keyboard()
     )
+
 
 # Обработчик кнопки '📨 Подписаться на гороскоп'
 @dp.message(lambda message: message.text == "📨 Подписаться на гороскоп")
@@ -594,16 +645,17 @@ async def btn_subscribe(message: types.Message):
     if not user_data or not user_data[1]:
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text="❌ Сначала введите дату рождения через /start"
+            text="❌ Сначала введите дату рождения через /start",
         )
         return
-    
+
     await subscribe_user(message.from_user.id)
     await message.bot.send_message(
         chat_id=message.chat.id,
         text="✅ Вы успешно подписались на ежедневную рассылку гороскопа!\nГороскоп будет приходить каждый день в 9:00 утра.",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(),
     )
+
 
 # Обработчик кнопки '❌ Отписаться'
 @dp.message(lambda message: message.text == "❌ Отписаться")
@@ -619,8 +671,9 @@ async def btn_unsubscribe(message: types.Message):
     await message.bot.send_message(
         chat_id=message.chat.id,
         text="❌ Вы отписались от ежедневной рассылки гороскопа.",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(),
     )
+
 
 # Обработчик кнопки '❓ Помощь'
 @dp.message(lambda message: message.text == "❓ Помощь")
@@ -641,6 +694,8 @@ async def btn_help(message: types.Message):
 Кнопки меню:
 🔮 Гороскоп - Получить гороскоп на сегодня
 📊 Натальная карта - Ссылка на вашу натальную карту
+🔢 Число жизни - Рассчитать число жизни
+🧠 Психопортрет - Составить психологический портрет
 👤 Мой профиль - Просмотр ваших данных
 📨 Подписаться - Ежедневная рассылка гороскопа
 ❌ Отписаться - Отменить подписку
@@ -653,10 +708,9 @@ async def btn_help(message: types.Message):
 /help - Помощь
 """
     await message.bot.send_message(
-        chat_id=message.chat.id,
-        text=help_text,
-        reply_markup=get_main_keyboard()
+        chat_id=message.chat.id, text=help_text, reply_markup=get_main_keyboard()
     )
+
 
 # Обработчик кнопки "🔢 Число жизни"
 @dp.message(lambda message: message.text == "🔢 Число жизни")
@@ -674,7 +728,7 @@ async def btn_soul_formula(message: types.Message):
         await message.bot.send_message(
             chat_id=message.chat.id,
             text="❌ Сначала введите дату рождения через /start",
-            reply_markup=get_main_keyboard() # Добавляем клавиатуру для удобства
+            reply_markup=get_main_keyboard(),  # Добавляем клавиатуру для удобства
         )
         return
 
@@ -763,11 +817,13 @@ async def btn_soul_formula(message: types.Message):
         "Дата рождения не указана.": "❌ Дата рождения не указана.",
         "Неверный формат даты.": "❌ Неверный формат даты.",
         "Некорректная дата.": "❌ Некорректная дата.",
-        "Ошибка при расчёте.": "❌ Ошибка при расчёте формулы души."
+        "Ошибка при расчёте.": "❌ Ошибка при расчёте формулы души.",
     }
     # --- Конец обновленных описаний ---
 
-    base_description = descriptions.get(soul_number, f"Неизвестное число: {soul_number}")
+    base_description = descriptions.get(
+        soul_number, f"Неизвестное число: {soul_number}"
+    )
 
     # Добавляем научно-обоснованное предупреждение
     disclaimer = "\n\nℹ️ *Важно:* Нумерология не является научной дисциплиной. Это интерпретация чисел, основанная на традициях и верованиях."
@@ -778,12 +834,106 @@ async def btn_soul_formula(message: types.Message):
         chat_id=message.chat.id,
         text=response,
         reply_markup=get_main_keyboard(),
-        parse_mode='Markdown' # Используем Markdown для форматирования
+        parse_mode="Markdown",  # Используем Markdown для форматирования
     )
+
+
+# Обработчик кнопки "🧠 Психопортрет"
+@dp.message(lambda message: message.text == "🧠 Психопортрет")
+async def btn_psychological_profile(message: types.Message):
+    """Обработчик кнопки '🧠 Психопортрет' - удаляет сообщение и показывает результат"""
+    # Пытаемся удалить сообщение с кнопкой
+    try:
+        await message.delete()
+    except Exception as e:
+        logging.warning(f"Не удалось удалить сообщение с кнопкой Психопортрет: {e}")
+
+    # 1. Получаем данные пользователя из БД
+    user_data = await get_user_data(message.from_user.id)
+    if not user_data or not user_data[0]:  # Проверяем наличие даты рождения
+        await message.bot.send_message(
+            chat_id=message.chat.id,
+            text="❌ Сначала введите дату рождения через /start",
+            reply_markup=get_main_keyboard()
+        )
+        return
+
+    # 2. Извлекаем данные
+    birth_date = user_data[0]
+    zodiac_sign = user_data[1]
+    birth_time = user_data[2]
+    birth_place = user_data[3]
+
+    # 3. Отправляем сообщение о загрузке
+    loading_msg = await message.bot.send_message(
+        chat_id=message.chat.id,
+        text="🧠 Анализирую ваш психологический портрет, ожидайте пожалуйста (примерно 10-15 секунд)..."
+    )
+
+    try:
+        # 4. Формируем запрос к Qwen
+        prompt = f"""
+        На основе следующих данных составь подробный психологический портрет человека:
+        
+        Дата рождения: {birth_date}
+        Знак зодиака: {zodiac_sign}
+        Время рождения: {birth_time or 'не указано'}
+        Место рождения: {birth_place or 'не указано'}
+        
+        Пожалуйста, составь анализ на основе:
+        1. МВТI (Myers-Briggs Type Indicator) - определи наиболее вероятный тип личности
+        2. Эннеаграмма - определи наиболее вероятный тип по эннеаграмме
+        3. Big Five (Пять факторов личности) - опиши уровни открытости, добросовестности, экстраверсии, agreeableness и нейротизма
+        
+        Для каждого аспекта:
+        - Дай обоснование почему это наиболее вероятно
+        - Опиши сильные и слабые стороны
+        - Дай практические рекомендации по развитию
+        
+        Ответ должен быть структурированным, понятным и мотивирующим.
+        Используй профессиональный, но дружелюбный тон.
+        """
+
+        # 5. Отправляем запрос к Qwen с правильной моделью
+        response = await qwen_client.chat.completions.create(
+            model="openrouter/auto",  # Используем автоматический выбор модели
+            messages=[
+                {"role": "system", "content": "Ты профессиональный психолог и астролог. Ты умеешь составлять психологические портреты на основе астрологических данных и даты рождения. Отвечай на русском языке."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=3000
+        )
+
+        # 6. Получаем ответ
+        psychological_profile = response.choices[0].message.content
+
+        # 7. Удаляем сообщение о загрузке
+        await loading_msg.delete()
+
+        # 8. Отправляем результат
+        await message.bot.send_message(
+            chat_id=message.chat.id,
+            text=f"🧠 Ваш психологический портрет:\n\n{psychological_profile}",
+            reply_markup=get_main_keyboard()
+        )
+
+    except Exception as e:
+        # Удаляем сообщение о загрузке
+        await loading_msg.delete()
+        
+        # Отправляем сообщение об ошибке
+        await message.bot.send_message(
+            chat_id=message.chat.id,
+            text=f"❌ Произошла ошибка при составлении психологического портрета: {str(e)}\n\nПожалуйста, попробуйте позже.",
+            reply_markup=get_main_keyboard()
+        )
+        logging.error(f"Ошибка при генерации психопортрета для пользователя {message.from_user.id}: {e}")
+
 
 # УНИВЕРСАЛЬНЫЙ ХЭНДЛЕР ДЛЯ ОСТАЛЬНЫХ СООБЩЕНИЙ
 # Этот хэндлер должен быть последним, чтобы не перехватывать команды и кнопки
-@dp.message(~F.text.startswith("/")) # Ловим сообщения, которые НЕ начинаются с "/"
+@dp.message(~F.text.startswith("/"))  # Ловим сообщения, которые НЕ начинаются с "/"
 async def handle_any_other_message(message: types.Message, state: FSMContext):
     """
     Универсальный обработчик для любых других текстовых сообщений.
@@ -797,24 +947,24 @@ async def handle_any_other_message(message: types.Message, state: FSMContext):
         logging.warning(f"Не удалось удалить сообщение '{message.text}': {e}")
 
     current_state = await state.get_state()
-    
+
     # Если пользователь в процессе ввода данных, но отправил что-то не то
     if current_state == UserData.waiting_for_birth_date.state:
         await message.bot.send_message(
             chat_id=message.chat.id,
             text="❌ Пожалуйста, введите дату рождения в формате ДД.ММ.ГГГГ\n"
-                 "Пример: 31.07.1990"
+            "Пример: 31.07.1990",
         )
     elif current_state == UserData.waiting_for_birth_time.state:
         await message.bot.send_message(
             chat_id=message.chat.id,
             text="❌ Пожалуйста, введите время рождения в формате ЧЧ:ММ или '-' если не знаете\n"
-                 "Пример: 14:30 или -"
+            "Пример: 14:30 или -",
         )
     elif current_state == UserData.waiting_for_birth_place.state:
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text="❌ Пожалуйста, введите место рождения (город) или '-' если не знаете"
+            text="❌ Пожалуйста, введите место рождения (город) или '-' если не знаете",
         )
     # Для всех других случаев (например, случайный текст) просто игнорируем
     # или можно отправить общее сообщение, если нужно:
@@ -825,28 +975,32 @@ async def handle_any_other_message(message: types.Message, state: FSMContext):
     #         reply_markup=get_main_keyboard()
     #     )
 
+
 # Функция для форматирования реального гороскопа
 def format_real_horoscope_message(data: dict) -> str:
     """Форматирование реального гороскопа с астрологическими данными"""
-    message = data.get('description', 'Гороскоп недоступен.')
+    message = data.get("description", "Гороскоп недоступен.")
     return message
+
 
 # Основная функция запуска бота
 async def main():
     await init_db()
-    
+
     # Инициализируем бота для установки команд
     bot_instance = Bot(token=BOT_TOKEN)
-    
+
     # Устанавливаем команды
     await set_bot_commands(bot_instance)
-    
+
     # Запускаем планировщик
     asyncio.create_task(scheduler(bot_instance))
-    
+
     # Запускаем polling
     await dp.start_polling(bot_instance)
+
 
 # Точка входа в программу
 if __name__ == "__main__":
     asyncio.run(main())
+
